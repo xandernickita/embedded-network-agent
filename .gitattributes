@@ -1,0 +1,15 @@
+# Normalize line endings so Windows and Linux (the Pi) checkouts agree.
+* text=auto eol=lf
+
+# Must stay LF or they break on the Pi.
+*.sh text eol=lf
+*.service text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.pcap binary

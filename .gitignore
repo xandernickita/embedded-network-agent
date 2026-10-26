@@ -1,0 +1,42 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Secrets: only *.example files are committed
+.env
+.env.*
+*.pem
+*.key
+
+# C++ build output
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Benchmarks: raw captures stay local, CSV summaries and charts are committed
+*.pcap
+*.pcapng
+benchmarks/results/scratch/
+
+# Office documents live on the shared drive, not here
+*.docx
+*.pptx
+*.xlsx
+*.pdf
+~$*

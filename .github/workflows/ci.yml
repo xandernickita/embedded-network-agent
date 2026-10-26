@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: server (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release, sanitize]
+    steps:
+      - uses: actions/checkout@v4
+      # Same JSON package the Pi installs, so CI doesn't depend on the FetchContent fallback.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq nlohmann-json3-dev
+      - name: Configure
+        run: >
+          cmake -S server -B server/build -DNDA_WERROR=ON
+          ${{ matrix.variant == 'sanitize' && '-DNDA_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug' || '-DCMAKE_BUILD_TYPE=Release' }}
+      - run: cmake --build server/build -j
+      - run: ctest --test-dir server/build --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nda-server-${{ matrix.variant }}
+          path: server/build/nda-server
+          retention-days: 3
+
+  client:
+    name: client (Python ${{ matrix.python }})
+    needs: server
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]  # Pi OS Bookworm / Trixie
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: client/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      # Integration tests run against the sanitizer build, so memory errors in the
+      # socket layer fail the PR, not the demo.
+      - uses: actions/download-artifact@v4
+        with:
+          name: nda-server-sanitize
+          path: client/bin
+      - run: chmod +x bin/nda-server
+      - run: pytest --cov=nda_client --cov-report=term
+        env:
+          NDA_SERVER_BIN: ${{ github.workspace }}/client/bin/nda-server
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+
+  windows-client:
+    # The laptop is Windows: make sure the client and its unit tests work there.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: pytest
