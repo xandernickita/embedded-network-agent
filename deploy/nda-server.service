@@ -1,0 +1,28 @@
+[Unit]
+Description=Embedded Network Diagnostics Agent
+Documentation=https://github.com/xandernickita/embedded-network-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/nda-server --tcp-port 5000 --udp-port 5001
+Restart=on-failure
+RestartSec=2
+
+# Least privilege: the agent only reads /proc and /sys and opens unprivileged ports.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
