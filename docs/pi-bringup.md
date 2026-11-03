@@ -1,4 +1,4 @@
-# Pi bring-up checklist (Raspberry Pi 3B)
+# Pi bring-up checklist (Raspberry Pi 3B+)
 
 Goal for the first session: **laptop runs `nda status` against the Pi.** Expect about
 an hour, most of it waiting on the SD card write and `apt`.
@@ -32,7 +32,7 @@ In Raspberry Pi Imager:
 | Device | Raspberry Pi 3 |
 | OS | Raspberry Pi OS **Lite (64-bit)** — under "Raspberry Pi OS (other)" |
 | Hostname | `nda-pi` |
-| Username | your choice (examples below use `alex`) |
+| Username | your choice; it's the name you SSH in with (`ssh <username>@nda-pi.local`) |
 | Wi-Fi | SSID / password / country `US` (skip if using Ethernet only) |
 | Locale | America/Detroit |
 | Services | Enable SSH, **public-key only**, paste the contents of `id_ed25519.pub` |
@@ -42,7 +42,7 @@ In Raspberry Pi Imager:
 ## First boot
 
 ```powershell
-ssh alex@nda-pi.local          # wait ~90 s after power-on for first-boot resize
+ssh <username>@nda-pi.local    # wait ~90 s after power-on for first-boot resize
 ```
 
 If `nda-pi.local` doesn't resolve, find the Pi's IP in the router's client list and use that.
@@ -52,6 +52,10 @@ On the Pi:
 ```bash
 sudo apt-get update && sudo apt-get full-upgrade -y && sudo reboot
 # reconnect, then:
+# The repo is private: log the Pi into GitHub first (device-code flow, approve on the laptop
+# at github.com/login/device). gh also handles credentials for every later `git pull`.
+sudo apt-get install -y git gh
+gh auth login                  # GitHub.com, HTTPS, authenticate Git: yes, web browser
 git clone https://github.com/xandernickita/embedded-network-agent.git
 cd embedded-network-agent
 ./deploy/pi-setup.sh           # packages, client venv, build, unit tests, systemd install
