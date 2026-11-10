@@ -8,6 +8,7 @@ so the measured server binary is unchanged (docs/decisions/003-laptop-side-statu
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -75,16 +76,48 @@ def make_handler(source: StatusSource, refresh_s: float) -> type[BaseHTTPRequest
     return Handler
 
 
-def make_server(client: AgentClient, listen: str = "127.0.0.1", port: int = 8080, refresh_s: float = 2.0):
+DEFAULT_WEB_PORT = 8080
+
+
+class _StatusHTTPServer(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second program bind a port that's already in use, so
+    # two pages could silently share 8080. Only reuse addresses where it means TIME_WAIT.
+    allow_reuse_address = sys.platform != "win32"
+    daemon_threads = True
+
+
+class WebBindError(Exception):
+    """The status page couldn't get a local port."""
+
+
+def make_server(client: AgentClient, listen: str = "127.0.0.1", port: int = DEFAULT_WEB_PORT, refresh_s: float = 2.0):
     """Returns (httpd, source). Port 0 picks a free port (tests)."""
     source = StatusSource(client)
-    httpd = ThreadingHTTPServer((listen, port), make_handler(source, refresh_s))
-    httpd.daemon_threads = True
+    httpd = _StatusHTTPServer((listen, port), make_handler(source, refresh_s))
     return httpd, source
 
 
-def serve(client: AgentClient, listen: str, port: int, refresh_s: float) -> None:
-    httpd, source = make_server(client, listen, port, refresh_s)
+def bind_with_fallback(client: AgentClient, listen: str, port: int | None, refresh_s: float):
+    """Bind the requested port. With no explicit port, try 8080 and fall back to any free
+    port: on Windows, 8080 is often inside a range reserved by Hyper-V/WSL/Docker
+    (WinError 10013) or already taken by another program (WinError 10048)."""
+    try:
+        return make_server(client, listen, DEFAULT_WEB_PORT if port is None else port, refresh_s)
+    except OSError as e:
+        if port is not None:
+            raise WebBindError(
+                f"cannot use {listen}:{port} ({e.strerror or e}). "
+                "Pick another --web-port, or omit it to let nda choose a free one."
+            ) from e
+        print(f"Port {DEFAULT_WEB_PORT} unavailable ({e.strerror or e}); using a free port instead.")
+        try:
+            return make_server(client, listen, 0, refresh_s)
+        except OSError as e2:
+            raise WebBindError(f"cannot listen on {listen} ({e2.strerror or e2})") from e2
+
+
+def serve(client: AgentClient, listen: str, port: int | None, refresh_s: float) -> None:
+    httpd, source = bind_with_fallback(client, listen, port, refresh_s)
     host, bound = httpd.server_address[:2]
     shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
     print(f"Status page: http://{shown}:{bound}/  (agent {client.host}:{client.port}, Ctrl+C to stop)")

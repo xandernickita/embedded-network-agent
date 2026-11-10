@@ -144,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sw = sub.add_parser("web", help="serve a live status page on this laptop (agent stays unchanged)")
     sw.add_argument("--listen", default="127.0.0.1", help="address for the page (default: this laptop only)")
-    sw.add_argument("--web-port", type=int, default=8080)
+    sw.add_argument("--web-port", type=int, default=None, help="default 8080, or any free port if 8080 is unavailable")
     sw.add_argument("--refresh", type=float, default=2.0, help="seconds between updates")
     return p
 
@@ -161,10 +161,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(path)
             return 0
         if a.cmd == "web":
-            from .web import serve
+            from .web import WebBindError, serve
 
             # Connects lazily, so the page starts (and shows "unreachable") even if the Pi is off.
-            serve(AgentClient(a.host, a.port, a.timeout), a.listen, a.web_port, max(a.refresh, 0.5))
+            try:
+                serve(AgentClient(a.host, a.port, a.timeout), a.listen, a.web_port, max(a.refresh, 0.5))
+            except WebBindError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 1
             return 0
         with AgentClient(a.host, a.port, a.timeout) as c:
             out = a.fn(c, a)

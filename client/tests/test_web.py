@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -7,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from nda_client import AgentClient
+from nda_client import web as web_mod
+from nda_client.cli import main
 from nda_client.web import make_server
 
 
@@ -86,3 +89,31 @@ def test_page_recovers_after_agent_restart(server, web):
     assert get(base + "/api/status")[0] == 502
     server.start()
     assert json.loads(get(base + "/api/status")[2])["ok"] is True
+
+
+def _occupy() -> tuple[socket.socket, int]:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen()
+    return s, s.getsockname()[1]
+
+
+def test_default_port_falls_back_to_a_free_port(monkeypatch, capsys):
+    held, busy = _occupy()
+    with held:
+        monkeypatch.setattr(web_mod, "DEFAULT_WEB_PORT", busy)
+        httpd, source = web_mod.bind_with_fallback(AgentClient("127.0.0.1", 1), "127.0.0.1", None, 1.0)
+        try:
+            assert httpd.server_address[1] not in (0, busy)
+            assert "using a free port" in capsys.readouterr().out
+        finally:
+            httpd.server_close()
+            source.close()
+
+
+def test_explicit_busy_port_is_a_clear_error_not_a_traceback(capsys):
+    held, busy = _occupy()
+    with held:
+        assert main(["--host", "127.0.0.1", "--port", "1", "web", "--web-port", str(busy)]) == 1
+    err = capsys.readouterr().err
+    assert f"cannot use 127.0.0.1:{busy}" in err and "--web-port" in err
