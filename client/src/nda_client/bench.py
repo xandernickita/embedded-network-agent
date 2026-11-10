@@ -6,7 +6,9 @@ from __future__ import annotations
 import contextlib
 import csv
 import datetime as dt
+import ipaddress
 import platform
+import socket
 import threading
 import time
 from collections.abc import Iterable
@@ -19,7 +21,7 @@ from .stats import summarize_ms
 
 COLUMNS = [
     "run_id", "timestamp", "test", "transport", "link", "payload_bytes", "clients", "requests",
-    "ok", "errors", "lost", "duplicates", "reordered", "loss_pct",
+    "ok", "errors", "lost", "send_errors", "duplicates", "reordered", "loss_pct",
     "p50_ms", "p95_ms", "p99_ms", "mean_ms", "max_ms",
     "msgs_per_s", "payload_bytes_per_s", "duration_s",
     "server_host", "server_kernel", "client_platform", "client_python",
@@ -31,6 +33,31 @@ MATRIX_CLIENTS = [1, 2, 5]
 # UDP stops at one MTU: 4 KiB would be IP-fragmented, which tests the kernel's
 # reassembly rather than our protocol. 1472 is the largest unfragmented datagram.
 MATRIX_UDP_SIZES = [64, 256, 1024, 1472]
+
+# Largest unfragmented UDP payload per link type. Tailscale's tunnel interface has a
+# 1280-byte MTU, so a 1472-byte datagram is IP-fragmented before it enters the tunnel (or
+# rejected with EMSGSIZE when the Don't-Fragment bit is set): either way that row would
+# measure the tunnel's MTU, not the protocol.
+LINK_UDP_MAX = {"tailscale": udp.TAILSCALE_MAX_SIZE}
+
+TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")  # CGNAT range Tailscale assigns from
+
+
+def udp_max_for(link: str) -> int:
+    return LINK_UDP_MAX.get(link, udp.MAX_SIZE)
+
+
+def udp_sizes(max_size: int) -> list[int]:
+    """The matrix UDP sizes, capped at the link's largest unfragmented datagram."""
+    return sorted({s for s in MATRIX_UDP_SIZES if s <= max_size} | {max_size})
+
+
+def is_tailscale_address(host: str) -> bool:
+    """True when `host` resolves to a Tailscale (100.64.0.0/10) address."""
+    try:
+        return ipaddress.ip_address(socket.gethostbyname(host)) in TAILSCALE_NET
+    except (OSError, ValueError):
+        return False
 
 
 def environment(host: str, port: int, link: str, run_id: str) -> dict[str, Any]:
@@ -130,20 +157,23 @@ def udp_echo(
     host: str, port: int, env: dict[str, Any], size: int = 64, count: int = 1000, interval_s: float = 0.001
 ) -> dict[str, Any]:
     r = udp.run(host, port, count=count, size=size, interval_s=interval_s)
-    return _row(env, test="echo", transport="udp", payload_bytes=size, clients=1, requests=r.sent,
-                ok=r.received, errors=r.invalid, lost=r.lost, duplicates=r.duplicates, reordered=r.reordered,
+    return _row(env, test="echo", transport="udp", payload_bytes=size, clients=1, requests=r.sent + r.send_errors,
+                ok=r.received, errors=r.invalid, lost=r.lost, send_errors=r.send_errors,
+                duplicates=r.duplicates, reordered=r.reordered,
                 loss_pct=round(r.loss_pct, 3), duration_s=round(r.duration_s, 3),
                 msgs_per_s=round(r.received / r.duration_s, 1),
                 payload_bytes_per_s=round(r.received * size / r.duration_s, 1), **summarize_ms(r.rtts_ms))  # fmt: skip
 
 
-def matrix(host: str, tcp_port: int, udp_port: int, env: dict[str, Any], requests: int = 1000) -> Iterable[dict]:
+def matrix(
+    host: str, tcp_port: int, udp_port: int, env: dict[str, Any], requests: int = 1000, udp_max: int = udp.MAX_SIZE
+) -> Iterable[dict]:
     """The full plan matrix: payload x clients for TCP, sizes for UDP, plus a latency baseline."""
     yield tcp_latency(host, tcp_port, env, requests)
     for size in MATRIX_PAYLOADS:
         for clients in MATRIX_CLIENTS:
             yield tcp_echo(host, tcp_port, env, size, clients, requests)
-    for size in MATRIX_UDP_SIZES:
+    for size in udp_sizes(udp_max):
         yield udp_echo(host, udp_port, env, size, requests)
 
 

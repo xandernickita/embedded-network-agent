@@ -77,4 +77,7 @@ them on separate sockets also means a flood of benchmark datagrams can't delay a
 - TCP `payload_bytes_per_s` counts application payload in one direction. Framing and the
   JSON envelope add ~70 bytes per message, which dominates at 64-byte payloads.
 - UDP sizes stop at 1472 bytes (1500 MTU − 20 IP − 8 UDP). Larger datagrams fragment at the
-  IP layer, which would measure the kernel's reassembly, not this protocol.
+  IP layer, which would measure the kernel's reassembly, not this protocol. Over Tailscale the
+  limit is 1252 (1280 MTU); `nda bench` applies it automatically for `--link tailscale`.
+- UDP `send_errors` (the OS refused the datagram) are reported separately from `lost`
+  (sent but never echoed), so a local error is never mistaken for network loss.

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import socket
 import struct
 import threading
@@ -14,6 +13,7 @@ MAGIC = b"NDA1"
 HEADER = struct.Struct(">4sIQ")  # magic, seq, t_send_ns
 MIN_SIZE = HEADER.size  # 16
 MAX_SIZE = 1472  # never fragments on a 1500-byte MTU
+TAILSCALE_MAX_SIZE = 1252  # Tailscale's interface MTU is 1280: 1280 - 20 IPv4 - 8 UDP
 
 
 def build_datagram(seq: int, t_send_ns: int, size: int) -> bytes:
@@ -31,7 +31,8 @@ def parse_datagram(data: bytes) -> tuple[int, int] | None:
 
 @dataclass
 class UdpResult:
-    sent: int = 0
+    sent: int = 0  # datagrams the OS accepted; local send failures are counted separately
+    send_errors: int = 0  # e.g. EMSGSIZE when a datagram exceeds the interface MTU
     received: int = 0  # unique sequence numbers
     duplicates: int = 0
     reordered: int = 0
@@ -64,6 +65,10 @@ def analyze(sent: int, arrivals: list[tuple[int, int, int]]) -> UdpResult:
         r.rtts_ms.append((t_recv - t_send) / 1e6)
     r.received = len(seen)
     return r
+
+
+def _send(sock: socket.socket, data: bytes) -> None:
+    sock.send(data)  # separate function so tests can inject send failures
 
 
 def run(
@@ -107,9 +112,13 @@ def run(
     rx.start()
     t0 = time.perf_counter()
     next_send = t0
+    send_errors = 0
     for seq in range(count):
-        with contextlib.suppress(OSError):  # a failed send is simply counted as lost
-            sock.send(build_datagram(seq, time.perf_counter_ns(), size))
+        # A local send failure is not network loss: keep it out of the loss figure.
+        try:
+            _send(sock, build_datagram(seq, time.perf_counter_ns(), size))
+        except OSError:
+            send_errors += 1
         next_send += interval_s
         delay = next_send - time.perf_counter()
         if delay > 0:
@@ -119,7 +128,8 @@ def run(
     rx.join()
     sock.close()
 
-    result = analyze(count, arrivals)
+    result = analyze(count - send_errors, arrivals)
+    result.send_errors = send_errors
     result.invalid = invalid
     result.duration_s = time.perf_counter() - t0
     return result
