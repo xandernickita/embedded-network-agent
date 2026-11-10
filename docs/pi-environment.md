@@ -16,3 +16,4 @@ result in `benchmarks/results/` was measured on this setup unless its CSV says o
 | Laptop Python | Python 3.14.6 |
 | Network (Ethernet) | gigabit PHY behind USB 2.0 (~300 Mb/s practical) |
 | Network (Wi-Fi) | 802.11ac dual-band; record the band per run from `iw dev wlan0 link` (`freq:`) and power_save on/off |
+| Network (Tailscale) | tailscale0 MTU 1280; record direct vs. DERP relay (`tailscale ping nda-pi`) and Tailscale version per run |

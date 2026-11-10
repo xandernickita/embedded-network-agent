@@ -81,3 +81,40 @@ def test_csv_has_stable_columns_and_header_once(tmp_path):
     rows = list(csv.DictReader(out.open()))
     assert len(rows) == 3
     assert list(rows[0].keys()) == bench.COLUMNS
+
+
+def test_udp_sizes_are_capped_at_the_link_mtu():
+    assert bench.udp_sizes(udp.MAX_SIZE) == [64, 256, 1024, 1472]
+    assert bench.udp_sizes(bench.udp_max_for("tailscale")) == [64, 256, 1024, 1252]
+    assert bench.udp_max_for("ethernet") == 1472
+
+
+def test_tailscale_address_detection():
+    assert bench.is_tailscale_address("100.101.102.103")
+    assert bench.is_tailscale_address("100.64.0.1")
+    assert not bench.is_tailscale_address("100.128.0.1")  # just outside 100.64.0.0/10
+    assert not bench.is_tailscale_address("192.168.1.177")
+    assert not bench.is_tailscale_address("127.0.0.1")
+    assert not bench.is_tailscale_address("no-such-host.invalid")
+
+
+def test_local_send_failures_are_not_counted_as_network_loss(monkeypatch):
+    """A datagram the OS refuses to send (e.g. EMSGSIZE) never reached the network."""
+    calls = {"n": 0}
+    real_send = udp._send
+
+    def flaky(sock, data):
+        calls["n"] += 1
+        if calls["n"] % 4 == 0:
+            raise OSError(90, "Message too long")
+        real_send(sock, data)
+
+    monkeypatch.setattr(udp, "_send", flaky)
+    # Nothing answers on this port, so every datagram that *was* sent is lost.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as hole:
+        hole.bind(("127.0.0.1", 0))
+        port = hole.getsockname()[1]
+        r = udp.run("127.0.0.1", port, count=40, size=64, interval_s=0, drain_s=0.1)
+    assert r.send_errors == 10
+    assert r.sent == 30
+    assert r.lost == 30  # only datagrams that left the host count as lost

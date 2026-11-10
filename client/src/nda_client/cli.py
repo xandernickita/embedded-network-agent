@@ -84,6 +84,20 @@ def cmd_bench(a: argparse.Namespace) -> int:
         print(f"error: no agent answering on {a.host}:{a.port}", file=sys.stderr)
         return 1
 
+    over_tailscale = bench.is_tailscale_address(a.host)
+    if over_tailscale and a.link != "tailscale":
+        print(f"warning: {a.host} is a Tailscale address but --link is '{a.link}'; "
+              "these rows will be mislabelled. Use --link tailscale, or the LAN name (nda-pi.local).",
+              file=sys.stderr)  # fmt: skip
+    if a.link == "tailscale" and not over_tailscale:
+        print(f"warning: --link tailscale but {a.host} is not a Tailscale address; traffic is not using the tunnel.",
+              file=sys.stderr)  # fmt: skip
+    udp_max = a.udp_max or bench.udp_max_for("tailscale" if over_tailscale else a.link)
+    if a.kind == "udp" and a.payload > udp_max:
+        print(f"error: --payload {a.payload} exceeds the largest unfragmented datagram on this link ({udp_max})",
+              file=sys.stderr)  # fmt: skip
+        return 2
+
     if a.kind == "latency":
         rows = [bench.tcp_latency(a.host, a.port, env, a.requests)]
     elif a.kind == "echo":
@@ -91,7 +105,7 @@ def cmd_bench(a: argparse.Namespace) -> int:
     elif a.kind == "udp":
         rows = [bench.udp_echo(a.host, a.udp_port, env, a.payload, a.requests, a.interval)]
     else:
-        rows = bench.matrix(a.host, a.port, a.udp_port, env, a.requests)
+        rows = bench.matrix(a.host, a.port, a.udp_port, env, a.requests, udp_max)
 
     def show(rows):
         for r in rows:
@@ -130,7 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sb = sub.add_parser("bench", help="run benchmarks and append results to a CSV")
     sb.add_argument("kind", choices=["latency", "echo", "udp", "matrix"])
-    sb.add_argument("--link", default="unknown", help="wifi | ethernet | loopback (recorded in the CSV)")
+    sb.add_argument("--link", default="unknown", help="ethernet | wifi | tailscale | loopback (recorded in the CSV)")
+    sb.add_argument("--udp-max", type=int, default=None,
+                    help="largest UDP datagram to test (default 1472; 1252 for tailscale)")  # fmt: skip
     sb.add_argument("--payload", type=int, default=64, help="payload bytes (echo, udp)")
     sb.add_argument("--clients", type=int, default=1, help="parallel TCP connections (echo)")
     sb.add_argument("--requests", type=int, default=1000, help="requests per client / datagrams")

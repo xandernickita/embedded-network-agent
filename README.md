@@ -20,6 +20,7 @@ Status:          OK
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The wire contract: framing, messages, error codes, UDP datagram format |
 | [docs/architecture.md](docs/architecture.md) | Components, event loop, robustness rules, measurement notes |
 | [docs/pi-bringup.md](docs/pi-bringup.md) | Flashing, first boot, deploy, troubleshooting |
+| [docs/remote-access.md](docs/remote-access.md) | Tailscale: reaching the Pi from any network, and benchmarking the tunnel |
 | [docs/decisions/](docs/decisions/) | Why C++ + Python, why length-prefixed frames, why the status page lives on the laptop |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Branches, PRs, commit style |
 
@@ -31,7 +32,7 @@ server/            C++ agent (CMake)
   tests/           unit tests + fake /proc and /sys trees
 client/            Python package `nda_client` and the `nda` CLI
   tests/           unit tests + loopback integration tests against the real server
-deploy/            Pi setup, install, systemd unit, netem impairment script
+deploy/            Pi setup, install, systemd unit, netem impairment, Tailscale
 benchmarks/results CSV results and charts (committed)
 docs/              protocol, architecture, bring-up, decisions
 ```
@@ -82,6 +83,7 @@ to the Pi ([decision 003](docs/decisions/003-laptop-side-status-page.md)). Optio
 nda bench matrix --link ethernet --out benchmarks/results/ethernet.csv
 nda bench matrix --link wifi     --out benchmarks/results/wifi.csv
 nda bench udp --payload 256 --requests 10000 --link wifi --out benchmarks/results/udp-loss.csv
+nda bench matrix --host nda-pi --link tailscale --out benchmarks/results/tailscale.csv   # via the tunnel
 nda plot benchmarks/results/ethernet.csv
 ```
 
