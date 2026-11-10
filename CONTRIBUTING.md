@@ -32,7 +32,13 @@ from them. Move finished work onto a topic branch first.
 2. **CI must pass before merge.** It builds the server with warnings as errors, runs the
    C++ unit tests (plain and under AddressSanitizer/UBSan), lints the client with ruff,
    and runs the Python unit and loopback integration tests.
-3. **Squash-merge** topic branches so `develop` reads as one commit per feature.
+3. **Pick the merge method by target branch.**
+   - Topic branch → `develop`: **Squash and merge**, so `develop` reads as one commit per feature.
+   - `develop` → `main`: **Create a merge commit**, never squash. Squashing copies develop's
+     changes onto `main` as a new, unrelated commit, so the two branches stop sharing history
+     and every later release PR re-applies old work (this happened once: PRs #2, #4, fixed by #5).
+   - `develop` is the default branch, so new PRs target it automatically. Check the base
+     dropdown anyway before opening one.
 4. **Change the contract first.** If a message shape changes, edit `docs/PROTOCOL.md`
    in the same pull request as the server and client change.
 5. **Never commit secrets or raw captures.** Wi-Fi passwords, SSH keys and `.env` files
