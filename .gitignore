@@ -1,4 +1,5 @@
-# OS / editors
+# OS / editors / editor plugins
+.bevel/
 .DS_Store
 Thumbs.db
 desktop.ini
