@@ -20,7 +20,7 @@ Status:          OK
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The wire contract: framing, messages, error codes, UDP datagram format |
 | [docs/architecture.md](docs/architecture.md) | Components, event loop, robustness rules, measurement notes |
 | [docs/pi-bringup.md](docs/pi-bringup.md) | Flashing, first boot, deploy, troubleshooting |
-| [docs/decisions/](docs/decisions/) | Why C++ + Python, why length-prefixed frames |
+| [docs/decisions/](docs/decisions/) | Why C++ + Python, why length-prefixed frames, why the status page lives on the laptop |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Branches, PRs, commit style |
 
 ## Layout
@@ -64,6 +64,17 @@ See [docs/pi-bringup.md](docs/pi-bringup.md). Short version, on the Pi:
 git clone https://github.com/xandernickita/embedded-network-agent.git
 cd embedded-network-agent && ./deploy/pi-setup.sh
 ```
+
+## Status page
+
+```powershell
+nda web                     # then open http://localhost:8080/
+```
+
+A live view of `nda status` that refreshes every 2 s and shows when the Pi is unreachable.
+It runs on the laptop and talks to the Pi over the normal TCP protocol, so nothing is added
+to the Pi ([decision 003](docs/decisions/003-laptop-side-status-page.md)). Options:
+`--web-port`, `--refresh`, `--listen` (default `127.0.0.1`: this laptop only).
 
 ## Benchmarks
 

@@ -6,6 +6,7 @@
     nda diag default_route         run an allowlisted diagnostic
     nda bench latency|echo|udp|matrix --out benchmarks/results/run.csv
     nda plot benchmarks/results/run.csv
+    nda web                        live status page at http://localhost:8080/
 
 Host comes from --host or the NDA_HOST environment variable (default 127.0.0.1).
 """
@@ -140,6 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
     spl = sub.add_parser("plot", help="draw the two report charts from a results CSV (needs [plot] extra)")
     spl.add_argument("csv")
     spl.add_argument("--outdir", default=None)
+
+    sw = sub.add_parser("web", help="serve a live status page on this laptop (agent stays unchanged)")
+    sw.add_argument("--listen", default="127.0.0.1", help="address for the page (default: this laptop only)")
+    sw.add_argument("--web-port", type=int, default=8080)
+    sw.add_argument("--refresh", type=float, default=2.0, help="seconds between updates")
     return p
 
 
@@ -153,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
 
             for path in plot(Path(a.csv), Path(a.outdir) if a.outdir else None):
                 print(path)
+            return 0
+        if a.cmd == "web":
+            from .web import serve
+
+            # Connects lazily, so the page starts (and shows "unreachable") even if the Pi is off.
+            serve(AgentClient(a.host, a.port, a.timeout), a.listen, a.web_port, max(a.refresh, 0.5))
             return 0
         with AgentClient(a.host, a.port, a.timeout) as c:
             out = a.fn(c, a)
