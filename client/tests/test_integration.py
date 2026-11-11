@@ -158,3 +158,10 @@ def test_recovery_after_server_restart(server):
 def test_sigterm_shuts_down_cleanly(server):
     assert server.stop() == 0
     assert any(ev.get("event") == "stopped" for ev in server.logs)
+
+
+def test_udp_rate_excludes_the_drain_wait(server):
+    """msgs_per_s must not include the idle wait for late replies after the last send."""
+    r = udp.run(server.host, server.udp_port, count=200, size=64, interval_s=0, drain_s=1.5)
+    assert r.received >= 195
+    assert r.duration_s < 1.0  # 200 loopback datagrams take milliseconds, not drain_s
