@@ -81,3 +81,58 @@ def test_csv_has_stable_columns_and_header_once(tmp_path):
     rows = list(csv.DictReader(out.open()))
     assert len(rows) == 3
     assert list(rows[0].keys()) == bench.COLUMNS
+
+
+def test_udp_sizes_are_capped_at_the_link_mtu():
+    assert bench.udp_sizes(udp.MAX_SIZE) == [64, 256, 1024, 1472]
+    assert bench.udp_sizes(bench.udp_max_for("tailscale")) == [64, 256, 1024, 1252]
+    assert bench.udp_max_for("ethernet") == 1472
+
+
+def test_tailscale_address_detection():
+    assert bench.is_tailscale_address("100.101.102.103")
+    assert bench.is_tailscale_address("100.64.0.1")
+    assert not bench.is_tailscale_address("100.128.0.1")  # just outside 100.64.0.0/10
+    assert not bench.is_tailscale_address("192.168.1.177")
+    assert not bench.is_tailscale_address("127.0.0.1")
+    assert not bench.is_tailscale_address("no-such-host.invalid")
+
+
+def test_local_send_failures_are_not_counted_as_network_loss(monkeypatch):
+    """A datagram the OS refuses to send (e.g. EMSGSIZE) never reached the network."""
+    calls = {"n": 0}
+    real_send = udp._send
+
+    def flaky(sock, data):
+        calls["n"] += 1
+        if calls["n"] % 4 == 0:
+            raise OSError(90, "Message too long")
+        real_send(sock, data)
+
+    monkeypatch.setattr(udp, "_send", flaky)
+    # Nothing answers on this port, so every datagram that *was* sent is lost.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as hole:
+        hole.bind(("127.0.0.1", 0))
+        port = hole.getsockname()[1]
+        r = udp.run("127.0.0.1", port, count=40, size=64, interval_s=0, drain_s=0.1)
+    assert r.send_errors == 10
+    assert r.sent == 30
+    assert r.lost == 30  # only datagrams that left the host count as lost
+
+
+def test_plot_aggregates_repeated_runs_by_median():
+    from nda_client.plot import latency_series, throughput_series
+
+    def row(run, clients, payload, p50, p99, mps, link="ethernet"):
+        return {"run_id": run, "test": "echo", "transport": "tcp", "link": link, "clients": str(clients),
+                "payload_bytes": str(payload), "p50_ms": str(p50), "p99_ms": str(p99),
+                "msgs_per_s": str(mps)}  # fmt: skip
+
+    rows = [row("a", 1, 64, 2.0, 10, 300), row("b", 1, 64, 3.0, 120, 260), row("c", 1, 64, 2.5, 12, 280),
+            row("a", 5, 64, 3.0, 9, 1400), row("a", 1, 64, 9.0, 9, 1, link="wifi")]  # fmt: skip
+    lat = latency_series(rows)
+    assert lat["TCP / ethernet"][64.0]["p50"] == (2.5, 2.0, 3.0, 3)  # median, min, max, runs
+    assert lat["TCP / ethernet"][64.0]["p99"][0] == 12  # one 120 ms spike doesn't drag the median
+    assert set(lat) == {"TCP / ethernet", "TCP / wifi"}
+    thr = throughput_series(rows)
+    assert thr["64 B / ethernet"][1.0][0] == 280 and thr["64 B / ethernet"][5.0][3] == 1

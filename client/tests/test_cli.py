@@ -50,3 +50,19 @@ def test_plot_writes_two_charts(server, tmp_path):
     assert main(["plot", str(out)]) == 0
     assert (tmp_path / "latency_vs_payload.png").exists()
     assert (tmp_path / "throughput_vs_clients.png").exists()
+
+
+def test_tailscale_link_caps_udp_and_warns_when_not_tunnelled(server, tmp_path, capsys):
+    out = tmp_path / "r.csv"
+    # 1472 fits Ethernet but not the 1280-byte Tailscale tunnel MTU.
+    assert main(args(server, "bench", "udp", "--link", "tailscale", "--payload", "1472", "--out", str(out))) == 2
+    err = capsys.readouterr().err
+    assert "not a Tailscale address" in err and "exceeds the largest unfragmented datagram" in err
+    assert not out.exists()
+
+
+def test_udp_csv_records_send_errors_column(server, tmp_path):
+    out = tmp_path / "r.csv"
+    assert main(args(server, "bench", "udp", "--requests", "20", "--link", "loopback", "--out", str(out))) == 0
+    row = next(csv.DictReader(out.open()))
+    assert row["send_errors"] == "0" and row["requests"] == "20"

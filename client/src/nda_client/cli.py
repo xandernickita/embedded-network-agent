@@ -5,7 +5,7 @@
     nda netinfo | metrics          interfaces / server counters
     nda diag default_route         run an allowlisted diagnostic
     nda bench latency|echo|udp|matrix --out benchmarks/results/run.csv
-    nda plot benchmarks/results/run.csv
+    nda plot benchmarks/results/ethernet.csv benchmarks/results/wifi.csv
     nda web                        live status page at http://localhost:8080/
 
 Host comes from --host or the NDA_HOST environment variable (default 127.0.0.1).
@@ -84,6 +84,20 @@ def cmd_bench(a: argparse.Namespace) -> int:
         print(f"error: no agent answering on {a.host}:{a.port}", file=sys.stderr)
         return 1
 
+    over_tailscale = bench.is_tailscale_address(a.host)
+    if over_tailscale and a.link != "tailscale":
+        print(f"warning: {a.host} is a Tailscale address but --link is '{a.link}'; "
+              "these rows will be mislabelled. Use --link tailscale, or the LAN name (nda-pi.local).",
+              file=sys.stderr)  # fmt: skip
+    if a.link == "tailscale" and not over_tailscale:
+        print(f"warning: --link tailscale but {a.host} is not a Tailscale address; traffic is not using the tunnel.",
+              file=sys.stderr)  # fmt: skip
+    udp_max = a.udp_max or bench.udp_max_for("tailscale" if over_tailscale else a.link)
+    if a.kind == "udp" and a.payload > udp_max:
+        print(f"error: --payload {a.payload} exceeds the largest unfragmented datagram on this link ({udp_max})",
+              file=sys.stderr)  # fmt: skip
+        return 2
+
     if a.kind == "latency":
         rows = [bench.tcp_latency(a.host, a.port, env, a.requests)]
     elif a.kind == "echo":
@@ -91,7 +105,7 @@ def cmd_bench(a: argparse.Namespace) -> int:
     elif a.kind == "udp":
         rows = [bench.udp_echo(a.host, a.udp_port, env, a.payload, a.requests, a.interval)]
     else:
-        rows = bench.matrix(a.host, a.port, a.udp_port, env, a.requests)
+        rows = bench.matrix(a.host, a.port, a.udp_port, env, a.requests, udp_max)
 
     def show(rows):
         for r in rows:
@@ -130,7 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sb = sub.add_parser("bench", help="run benchmarks and append results to a CSV")
     sb.add_argument("kind", choices=["latency", "echo", "udp", "matrix"])
-    sb.add_argument("--link", default="unknown", help="wifi | ethernet | loopback (recorded in the CSV)")
+    sb.add_argument("--link", default="unknown", help="ethernet | wifi | tailscale | loopback (recorded in the CSV)")
+    sb.add_argument("--udp-max", type=int, default=None,
+                    help="largest UDP datagram to test (default 1472; 1252 for tailscale)")  # fmt: skip
     sb.add_argument("--payload", type=int, default=64, help="payload bytes (echo, udp)")
     sb.add_argument("--clients", type=int, default=1, help="parallel TCP connections (echo)")
     sb.add_argument("--requests", type=int, default=1000, help="requests per client / datagrams")
@@ -138,13 +154,13 @@ def build_parser() -> argparse.ArgumentParser:
     sb.add_argument("--run-id", default=None)
     sb.add_argument("--out", default="benchmarks/results/results.csv")
 
-    spl = sub.add_parser("plot", help="draw the two report charts from a results CSV (needs [plot] extra)")
-    spl.add_argument("csv")
+    spl = sub.add_parser("plot", help="draw the two report charts from one or more results CSVs (needs [plot] extra)")
+    spl.add_argument("csv", nargs="+", help="CSV files; several are drawn on the same charts (e.g. ethernet wifi)")
     spl.add_argument("--outdir", default=None)
 
     sw = sub.add_parser("web", help="serve a live status page on this laptop (agent stays unchanged)")
     sw.add_argument("--listen", default="127.0.0.1", help="address for the page (default: this laptop only)")
-    sw.add_argument("--web-port", type=int, default=8080)
+    sw.add_argument("--web-port", type=int, default=None, help="default 8080, or any free port if 8080 is unavailable")
     sw.add_argument("--refresh", type=float, default=2.0, help="seconds between updates")
     return p
 
@@ -157,14 +173,18 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "plot":
             from .plot import plot
 
-            for path in plot(Path(a.csv), Path(a.outdir) if a.outdir else None):
+            for path in plot([Path(c) for c in a.csv], Path(a.outdir) if a.outdir else None):
                 print(path)
             return 0
         if a.cmd == "web":
-            from .web import serve
+            from .web import WebBindError, serve
 
             # Connects lazily, so the page starts (and shows "unreachable") even if the Pi is off.
-            serve(AgentClient(a.host, a.port, a.timeout), a.listen, a.web_port, max(a.refresh, 0.5))
+            try:
+                serve(AgentClient(a.host, a.port, a.timeout), a.listen, a.web_port, max(a.refresh, 0.5))
+            except WebBindError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 1
             return 0
         with AgentClient(a.host, a.port, a.timeout) as c:
             out = a.fn(c, a)

@@ -1,23 +1,8 @@
 # Architecture
 
-```
- LAPTOP (Windows, Python 3.11+)                         RASPBERRY PI 3B (Pi OS Lite 64-bit)
- ┌──────────────────────────────┐                       ┌───────────────────────────────────────────┐
- │ nda CLI         (cli.py)     │                       │ nda-server  (C++17, one process, systemd) │
- │  status / ping / diag        │   TCP :5000           │  ┌─────────────── poll() loop ───────────┐ │
- │ AgentClient    (client.py)   │ ◀═══ framed JSON ════▶│  │ listen fd · client fds · udp fd       │ │
- │  request ids, timeouts,      │                       │  └───────┬──────────────────────┬────────┘ │
- │  reconnect + retry           │                       │   FrameDecoder            UDP echo         │
- │ framing.py                   │                       │   (framing.cpp)           (udp_echo.hpp)   │
- │                              │   UDP :5001           │          │                                 │
- │ udp.py  seq + t_send, RTT,   │ ◀════ NDA1 datagrams ▶│   Dispatcher (protocol.cpp)                │
- │         loss, dup, reorder   │                       │    validate → run command → respond        │
- │ bench.py → results.csv       │                       │          │                                 │
- │ plot.py  → 2 charts          │                       │   Telemetry (telemetry.cpp)                │
- └──────────────────────────────┘                       │    /proc · /sys · getifaddrs               │
-                                                        │   Metrics · JSON-line logs → journald      │
-                                                        └───────────────────────────────────────────┘
-```
+![Architecture](architecture.png)
+
+Diagram source: [architecture.mmd](architecture.mmd) (Mermaid).
 
 ## Layers
 
@@ -59,6 +44,15 @@ Known limitation: `run_diagnostic gateway_tcp` performs blocking `connect()` att
 (up to 3 × 500 ms) inside the loop, so other clients wait while it runs. Acceptable for an
 operator-triggered diagnostic; it would move to a worker thread if it mattered.
 
+## Memory limit
+
+`deploy/nda-server.service` sets `MemoryMax=64M`, but the stock Raspberry Pi kernel ships
+with the memory cgroup disabled (`/sys/fs/cgroup/cgroup.controllers` lists only
+`cpuset cpu io pids`), so systemd cannot enforce it and `MemoryCurrent` reads `[not set]`.
+Enabling it needs `cgroup_enable=memory` on the kernel command line and a reboot. The
+stability test measured memory by sampling `VmRSS` from `/proc/<pid>/status` instead:
+3.4 MB, flat for the whole run ([results.md](results.md)).
+
 ## Why TCP and UDP are on separate ports
 
 The command channel needs reliability and ordering (TCP). The benchmark channel must be
@@ -77,4 +71,7 @@ them on separate sockets also means a flood of benchmark datagrams can't delay a
 - TCP `payload_bytes_per_s` counts application payload in one direction. Framing and the
   JSON envelope add ~70 bytes per message, which dominates at 64-byte payloads.
 - UDP sizes stop at 1472 bytes (1500 MTU − 20 IP − 8 UDP). Larger datagrams fragment at the
-  IP layer, which would measure the kernel's reassembly, not this protocol.
+  IP layer, which would measure the kernel's reassembly, not this protocol. Over Tailscale the
+  limit is 1252 (1280 MTU); `nda bench` applies it automatically for `--link tailscale`.
+- UDP `send_errors` (the OS refused the datagram) are reported separately from `lost`
+  (sent but never echoed), so a local error is never mistaken for network loss.
