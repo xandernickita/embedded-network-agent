@@ -118,3 +118,21 @@ def test_local_send_failures_are_not_counted_as_network_loss(monkeypatch):
     assert r.send_errors == 10
     assert r.sent == 30
     assert r.lost == 30  # only datagrams that left the host count as lost
+
+
+def test_plot_aggregates_repeated_runs_by_median():
+    from nda_client.plot import latency_series, throughput_series
+
+    def row(run, clients, payload, p50, p99, mps, link="ethernet"):
+        return {"run_id": run, "test": "echo", "transport": "tcp", "link": link, "clients": str(clients),
+                "payload_bytes": str(payload), "p50_ms": str(p50), "p99_ms": str(p99),
+                "msgs_per_s": str(mps)}  # fmt: skip
+
+    rows = [row("a", 1, 64, 2.0, 10, 300), row("b", 1, 64, 3.0, 120, 260), row("c", 1, 64, 2.5, 12, 280),
+            row("a", 5, 64, 3.0, 9, 1400), row("a", 1, 64, 9.0, 9, 1, link="wifi")]  # fmt: skip
+    lat = latency_series(rows)
+    assert lat["TCP / ethernet"][64.0]["p50"] == (2.5, 2.0, 3.0, 3)  # median, min, max, runs
+    assert lat["TCP / ethernet"][64.0]["p99"][0] == 12  # one 120 ms spike doesn't drag the median
+    assert set(lat) == {"TCP / ethernet", "TCP / wifi"}
+    thr = throughput_series(rows)
+    assert thr["64 B / ethernet"][1.0][0] == 280 and thr["64 B / ethernet"][5.0][3] == 1

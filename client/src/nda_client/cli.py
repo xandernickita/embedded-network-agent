@@ -5,7 +5,7 @@
     nda netinfo | metrics          interfaces / server counters
     nda diag default_route         run an allowlisted diagnostic
     nda bench latency|echo|udp|matrix --out benchmarks/results/run.csv
-    nda plot benchmarks/results/run.csv
+    nda plot benchmarks/results/ethernet.csv benchmarks/results/wifi.csv
     nda web                        live status page at http://localhost:8080/
 
 Host comes from --host or the NDA_HOST environment variable (default 127.0.0.1).
@@ -154,8 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     sb.add_argument("--run-id", default=None)
     sb.add_argument("--out", default="benchmarks/results/results.csv")
 
-    spl = sub.add_parser("plot", help="draw the two report charts from a results CSV (needs [plot] extra)")
-    spl.add_argument("csv")
+    spl = sub.add_parser("plot", help="draw the two report charts from one or more results CSVs (needs [plot] extra)")
+    spl.add_argument("csv", nargs="+", help="CSV files; several are drawn on the same charts (e.g. ethernet wifi)")
     spl.add_argument("--outdir", default=None)
 
     sw = sub.add_parser("web", help="serve a live status page on this laptop (agent stays unchanged)")
@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "plot":
             from .plot import plot
 
-            for path in plot(Path(a.csv), Path(a.outdir) if a.outdir else None):
+            for path in plot([Path(c) for c in a.csv], Path(a.outdir) if a.outdir else None):
                 print(path)
             return 0
         if a.cmd == "web":
