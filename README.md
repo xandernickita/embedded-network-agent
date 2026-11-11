@@ -84,8 +84,12 @@ nda bench matrix --link ethernet --out benchmarks/results/ethernet.csv
 nda bench matrix --link wifi     --out benchmarks/results/wifi.csv
 nda bench udp --payload 256 --requests 10000 --link wifi --out benchmarks/results/udp-loss.csv
 nda bench matrix --host nda-pi --link tailscale --out benchmarks/results/tailscale.csv   # via the tunnel
-nda plot benchmarks/results/ethernet.csv
+nda plot benchmarks/results/ethernet.csv benchmarks/results/wifi.csv benchmarks/results/tailscale.csv
 ```
+
+Run each matrix **three times** into the same CSV. Single runs over Wi-Fi vary by 20-40 %
+and occasional ~120 ms stalls land on random configurations, so the charts plot the
+median across runs with the min-max range as error bars.
 
 Each row records the run id, link type, client platform and the server's hostname and
 kernel, as the plan requires. Impair the Pi's link to validate loss detection:
