@@ -38,6 +38,8 @@ class UdpResult:
     reordered: int = 0
     invalid: int = 0
     rtts_ms: list[float] = field(default_factory=list)
+    # From the first send to the last echo received (or the last send, if nothing came
+    # back). Excludes the drain wait at the end, so rates aren't diluted by idle time.
     duration_s: float = 0.0
 
     @property
@@ -111,12 +113,15 @@ def run(
     rx = threading.Thread(target=receiver, daemon=True)
     rx.start()
     t0 = time.perf_counter()
+    t0_ns = time.perf_counter_ns()
     next_send = t0
+    last_send_ns = t0_ns
     send_errors = 0
     for seq in range(count):
         # A local send failure is not network loss: keep it out of the loss figure.
         try:
             _send(sock, build_datagram(seq, time.perf_counter_ns(), size))
+            last_send_ns = time.perf_counter_ns()
         except OSError:
             send_errors += 1
         next_send += interval_s
@@ -131,5 +136,6 @@ def run(
     result = analyze(count - send_errors, arrivals)
     result.send_errors = send_errors
     result.invalid = invalid
-    result.duration_s = time.perf_counter() - t0
+    last_arrival_ns = max((t for _, _, t in arrivals), default=0)
+    result.duration_s = max(last_send_ns, last_arrival_ns, t0_ns + 1) / 1e9 - t0_ns / 1e9
     return result
