@@ -17,6 +17,7 @@ Status:          OK
 
 | Doc | What's in it |
 |---|---|
+| [docs/results.md](docs/results.md) | **Measured results**: acceptance tests, latency, throughput, discussion, deviations |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The wire contract: framing, messages, error codes, UDP datagram format |
 | [docs/architecture.md](docs/architecture.md) | Components, event loop, robustness rules, measurement notes |
 | [docs/pi-bringup.md](docs/pi-bringup.md) | Flashing, first boot, deploy, troubleshooting |
@@ -101,13 +102,16 @@ kernel, as the plan requires. Impair the Pi's link to validate loss detection:
 
 ## Acceptance tests (plan section 5)
 
-| Test | Where it's automated |
-|---|---|
-| TCP reliability | `test_tcp_reliability_sequential_requests` (loopback); `nda bench echo --requests 10000` (Pi) |
-| TCP correctness | `test_malformed_input_*`, `test_oversize_frame_*`, `test_partial_frame_*`, C++ `protocol:` tests |
-| UDP delivery | `test_udp_echo_counts_on_loopback`; `nda bench udp` + `netem.sh` (Pi) |
-| Latency p50/p95/p99 | `nda bench latency` |
-| Throughput | `nda bench echo --payload N` / `matrix` |
-| Concurrency (5 clients) | `test_five_concurrent_clients_without_corruption`; `matrix` |
-| Recovery | `test_recovery_after_server_restart`; `sudo systemctl restart nda-server` during `nda ping -n 1000` |
-| Stability (1 h) | Run `nda bench echo --requests 100000` and watch `nda metrics` / `systemctl status` memory |
+All passed on the Pi on 11 Nov 2026. Measured numbers, discussion and deviations from
+the plan are in [docs/results.md](docs/results.md).
+
+| Test | How it was run | Result |
+|---|---|---|
+| TCP reliability | `nda bench echo --requests 10000` (Pi); `test_tcp_reliability_sequential_requests` (CI) | 10,000 / 10,000 |
+| TCP correctness | `test_malformed_input_*`, `test_oversize_frame_*`, `test_partial_frame_*`, C++ `protocol:` tests (CI) | Documented errors; server stays up |
+| UDP delivery | `nda bench udp --requests 10000`; with `netem.sh eth0 loss 5%` | 0 % lost; 4.96 % measured vs 5 % injected |
+| Latency p50/p95/p99 | `nda bench matrix` (latency row), 3 runs per path | Ethernet 2.56 / 4.06 / 5.74 ms |
+| Throughput | `nda bench matrix`, 4 payloads × 1/2/5 clients | Up to 1,590 req/s (64 B, 5 clients) |
+| Concurrency (5 clients) | `matrix`; `test_five_concurrent_clients_without_corruption` (CI) | 180,000 requests, 0 corrupted |
+| Recovery | `sudo systemctl restart nda-server` during `nda ping -n 3000` | Client exits cleanly with a connection error |
+| Stability | `nda bench echo --requests 1000000` + `VmRSS` sampled every minute | 35.4 min, 0 errors, RSS flat at 3.4 MB |

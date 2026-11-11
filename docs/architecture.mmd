@@ -1,0 +1,46 @@
+%% Source for docs/architecture.png. Re-render: mmdc -i docs/architecture.mmd -o docs/architecture.png -s 2 -b white
+%%{init: {'theme':'base','themeVariables':{'fontSize':'15px','fontFamily':'Helvetica, Arial, sans-serif','lineColor':'#52514e','clusterBkg':'#fafaf8','clusterBorder':'#c9c8c1','edgeLabelBackground':'#ffffff'}}}%%
+flowchart TB
+    subgraph LAPTOP["Laptop · Windows 11 · Python 3.14 (stdlib only)"]
+        direction LR
+        CLI["nda CLI<br/>status · ping · netinfo · diag"]
+        WEB["nda web<br/>local status page :8080"]
+        BENCH["bench · plot<br/>CSV results, charts"]
+        CLIENT["AgentClient<br/>request IDs · timeouts · retry"]
+        UDPC["UDP benchmark<br/>seq · t_send · RTT · loss · reorder"]
+        CLI --> CLIENT
+        WEB --> CLIENT
+        BENCH --> CLIENT
+        BENCH --> UDPC
+    end
+
+    subgraph NET["Network paths measured"]
+        direction LR
+        ETH["Home LAN · Pi on Ethernet<br/>nda-pi.local / 192.168.1.180"]
+        WIFI["Home LAN · Pi on Wi-Fi 5 GHz<br/>192.168.1.177"]
+        TS["Tailscale WireGuard tunnel<br/>nda-pi · 100.x · MTU 1280"]
+    end
+
+    subgraph PI["Raspberry Pi 3B+ · Pi OS Lite 64-bit (Trixie) · systemd"]
+        direction LR
+        LOOP["nda-server (C++17)<br/>single-threaded poll() loop<br/>non-blocking sockets"]
+        FRAME["FrameDecoder<br/>4-byte length prefix · 64 KiB cap"]
+        DISP["Dispatcher<br/>validate · version · error codes"]
+        TELE["Telemetry<br/>/proc · /sys · getifaddrs"]
+        ECHO["UDP echo<br/>NDA1 datagrams"]
+        LOG["JSON-line logs → journald"]
+        LOOP --> FRAME --> DISP --> TELE
+        LOOP --> ECHO
+        LOOP --> LOG
+    end
+
+    CLIENT <-- "TCP :5000<br/>framed JSON v1" --> NET
+    UDPC <-- "UDP :5001<br/>echo" --> NET
+    NET <--> LOOP
+
+    classDef laptop fill:#eaf2fc,stroke:#2a78d6,color:#0b0b0b
+    classDef pi fill:#e8f7f1,stroke:#1baf7a,color:#0b0b0b
+    classDef net fill:#fdf0ea,stroke:#eb6834,color:#0b0b0b
+    class CLI,WEB,BENCH,CLIENT,UDPC laptop
+    class LOOP,FRAME,DISP,TELE,ECHO,LOG pi
+    class ETH,WIFI,TS net
