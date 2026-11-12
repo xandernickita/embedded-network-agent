@@ -1,8 +1,3 @@
-# Working in this repo
-
-Same conventions as the IRIS capstone repo (`AccessControl`), adapted for a one-person
-project.
-
 ## Branch model
 
 ```
