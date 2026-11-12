@@ -38,33 +38,129 @@ benchmarks/results CSV results and charts (committed)
 docs/              protocol, architecture, bring-up, decisions
 ```
 
-## Quick start
+## Installation
 
-### Laptop (Windows, PowerShell)
+First-time setup takes about an hour, most of it waiting for the SD card and `apt`.
+At the end, `nda status` on your laptop shows live telemetry from the Pi.
 
-```powershell
-py -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -e "client[dev,plot]"
-$env:NDA_HOST = "nda-pi.local"
-nda status
-```
+### What you need
 
-### Server on Linux / WSL2 (for development without the Pi)
+| Item | Requirement |
+|---|---|
+| Device | Raspberry Pi 3B or 3B+ (tested on a 3B+), microSD card ≥ 16 GB, 5 V / 2.5 A supply |
+| Laptop | Windows, macOS or Linux with Python ≥ 3.11 and Git |
+| Network | Both machines on the same network: a home router, Ethernet, or a phone hotspot on 2.4 GHz. Many campus networks block device-to-device traffic. |
 
-```bash
-cmake -S server -B server/build && cmake --build server/build -j
-ctest --test-dir server/build --output-on-failure
-./server/build/nda-server --bind 127.0.0.1        # then: NDA_HOST=127.0.0.1 nda status
-pytest client                                    # runs integration tests against the build
-```
+### 1. Laptop: install the client
 
-### Pi
-
-See [docs/pi-bringup.md](docs/pi-bringup.md). Short version, on the Pi:
+Create an SSH key if you don't have one (`ssh-keygen -t ed25519`, Enter at every prompt), then:
 
 ```bash
 git clone https://github.com/xandernickita/embedded-network-agent.git
-cd embedded-network-agent && ./deploy/pi-setup.sh
+cd embedded-network-agent
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # Windows PowerShell
+# source .venv/bin/activate         # macOS / Linux
+pip install -e "client[dev,plot]"
+pytest client                       # unit tests pass; integration tests skip without a local server
+```
+
+The client uses only the Python standard library; `[plot]` adds matplotlib for charts.
+
+### 2. Flash the SD card
+
+In [Raspberry Pi Imager](https://www.raspberrypi.com/software/): device **Raspberry Pi 3**,
+OS **Raspberry Pi OS Lite (64-bit)** (under "Raspberry Pi OS (other)"), then edit the settings:
+
+| Setting | Value |
+|---|---|
+| Hostname | `nda-pi` |
+| Username / password | your choice; the username is what you SSH in with |
+| Wireless LAN | SSID, password, country (skip for Ethernet only) |
+| Services | SSH enabled, **public-key authentication only**, paste your `id_ed25519.pub` |
+
+If Windows offers to format the card afterwards, click **Cancel**: the Linux partition is unreadable to Windows, not broken.
+
+### 3. Pi: first boot and install
+
+Connect Ethernet if you use it, then power. After about two minutes:
+
+```bash
+ssh <username>@nda-pi.local          # from the laptop
+```
+
+On the Pi:
+
+```bash
+sudo apt-get update && sudo apt-get full-upgrade -y && sudo reboot
+# reconnect, then:
+sudo apt-get install -y git
+git clone https://github.com/xandernickita/embedded-network-agent.git
+cd embedded-network-agent
+./deploy/pi-setup.sh
+```
+
+`pi-setup.sh` installs the toolchain, builds the server with warnings as errors, runs the
+unit tests and installs `nda-server` as a systemd service that starts at boot. It takes
+10–15 minutes on a Pi 3 and ends with `100% tests passed`, `active (running)` and the
+device details (record those in [docs/pi-environment.md](docs/pi-environment.md)).
+
+Then check the power supply: `vcgencmd get_throttled` must print `throttled=0x0`.
+Anything else means undervoltage, which causes network drops and invalid benchmarks.
+
+### 4. First contact
+
+From the laptop, with the virtual environment active:
+
+```bash
+nda --host nda-pi.local status
+nda --host nda-pi.local ping -n 20
+nda --host nda-pi.local diag default_route
+nda --host nda-pi.local web           # live status page; open the address it prints
+```
+
+Set `NDA_HOST=nda-pi.local` (PowerShell: `$env:NDA_HOST = "nda-pi.local"`) to drop `--host`.
+
+### 5. Optional: reach the Pi from any network
+
+Install [Tailscale](https://tailscale.com/download) on the laptop and sign in. On the Pi:
+
+```bash
+./deploy/tailscale.sh                 # approve the login link it prints
+```
+
+Disable key expiry for `nda-pi` in the Tailscale admin console. `nda --host nda-pi status`
+then works from anywhere. Benchmark rules for the tunnel: [docs/remote-access.md](docs/remote-access.md).
+
+### Updating
+
+```bash
+git pull && ./deploy/install.sh                  # Pi: rebuild, test, restart the service
+git pull && pip install -e "client[dev,plot]"    # laptop
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Permission denied (publickey)` | Use the username set in Imager; check the key you pasted is this laptop's `id_ed25519.pub` |
+| `nda-pi.local` doesn't resolve | Machines are on different networks, or mDNS is blocked: use the Pi's IP from the router |
+| `connection error` / `no agent answering` | On the Pi: `systemctl status nda-server`, `journalctl -u nda-server -n 20 -o cat` |
+| Pi never joins Wi-Fi | Wrong password or Wi-Fi country not set in Imager: re-flash |
+| `nda web` can't use port 8080 | Windows reserves it on some machines; `nda web` falls back to a free port and prints it |
+| `git clone` asks for a password on the Pi | The repository is private: `sudo apt-get install -y gh && gh auth login`, then clone again |
+
+Step-by-step bring-up with more detail: [docs/pi-bringup.md](docs/pi-bringup.md).
+
+### Developing without a Pi
+
+The server builds and runs on any Linux (or WSL2), so the whole stack can be tested on one machine:
+
+```bash
+cmake -S server -B server/build -DNDA_WERROR=ON && cmake --build server/build -j
+ctest --test-dir server/build --output-on-failure
+./server/build/nda-server --bind 127.0.0.1       # then: nda --host 127.0.0.1 status
+pytest client                                   # also runs the loopback integration tests
 ```
 
 ## Status page
